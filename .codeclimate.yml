@@ -1,0 +1,16 @@
+---
+engines:
+  duplication:
+    enabled: true
+    config:
+      languages:
+      - python
+  fixme:
+    enabled: true
+  radon: 
+    enabled: true
+    config: 
+      python_version: 2
+ratings:
+  paths:
+  - "**.py"
