@@ -80,7 +80,7 @@ class CoreConfig(object):
             s = Switches(v['name'])
             s.set_hall(v['hall'])
             rows = self.string_to_list(v['rows'])
-            s.set_rows([ str(x) + s.hall for x in rows ])
+            s.set_rows([ s.hall + str(x)  for x in rows ])
             s.set_bundle(self._bundle_id('Bundle-ether' + k))
             self.switches[s.name] = s
 
@@ -146,7 +146,7 @@ class CoreConfig(object):
             except KeyError:
                 continue
 
-    def create_routers(self):
+    def _create_routers(self, network):
         """ Create router config
 
         Create router config using string replace
@@ -154,55 +154,76 @@ class CoreConfig(object):
         with open(self.templates['router']) as f:
             template_data = f.read()
 
-        configs = {}
-        for network in self.networks:
-            if 'int' in network['options'].keys():
-                if 'othernet' in network['options'].keys():
-                    config_file = 'othernet.r1'
-                bundle = network['options']['int']
+        if 'int' in network['options'].keys():
+            if 'othernet' in network['options'].keys():
+                config_file = 'othernet.r1'
+            else:
                 config_file = self.network_file(network)
-                if config_file not in configs.keys():
-                    configs[config_file] = ''
+            bundle = network['options']['int']
+        else:
+            print "NO INT option IN ", network
+            return False, False
+
+        vlanid = str(network['vlan'])
+        name = network['name']
+        ipvfour = network['ipv4_txt']
+        ipvfour = self._gateway(ipvfour)
+        ipvfour_netmask = str(network['ipv4_netmask_txt'])
+        if 'vrf' in network['options'].keys():
+            vrf = 'vrf ' + network['options']['vrf']
+        else:
+            vrf = "! VRF GLOBAL"
+
+        # We dont use these atm
+        ipvsix = network['ipv6_txt']
+        ipvsix_netmask = network['ipv6_netmask_txt']
+
+        bundle_data = template_data.replace('$int$', bundle)
+        bundle_data = bundle_data.replace('$VLANID$', vlanid)
+        bundle_data = bundle_data.replace('$IPV4-ADDR1$', ipvfour)
+        bundle_data = bundle_data.replace('$IPV4-MASK$', ipvfour_netmask)
+        bundle_data = bundle_data.replace('$vrf$', vrf)
+        bundle_data = bundle_data.replace('$NAME$', name)
+
+        return config_file, bundle_data
+        # Need to figure out in which file to put the config in,
+        # it also has to be appended
+        
+    def _create_switches(self, network):
+        """ Create Switch configs
+
+        Generate switch configuration, vlanid port and row
+        """
+
+        for switch in self.switches.itervalues():
+            if network['name'] in switch.rows:
+                name = network['name']
+                vlan = network['vlan']
+                table_switches = network['options']['sw']
+                for counter, table_switch in enumerate(table_switches):
+                    with open(self.templates['switch'][counter]) as f:
+                        template = f.read()
+                    switch_data = template.replace('$NAME', name)
+                    switch_data = switch_data.replace('$NAME', name)
+
+
+    def create_config(self):
+        router_configs = {}
+        for network in self.networks:
+            network['name'] = network['name'].split('@')[1]
+            # Finding the cfile variable should probably its own method
+            cfile, config = self._create_routers(network)
+            if cfile in router_configs.keys():
+                router_configs[cfile] = router_configs[cfile] + config
             else:
-                print "NO INT option IN ", network
-                continue
+                router_configs[cfile] = config
 
-            vlanid = str(network['vlan'])
-            name = network['name'].strip('EVENT@')
-            ipvfour = network['ipv4_txt']
-            ipvfour = self._gateway(ipvfour)
-            ipvfour_netmask = str(network['ipv4_netmask_txt'])
-            if 'vrf' in network['options'].keys():
-                vrf = 'vrf ' + network['options']['vrf']
-            else:
-                vrf = "! VRF GLOBAL"
+            self._create_switches(network)
 
-            # We dont use these atm
-            ipvsix = network['ipv6_txt']
-            ipvsix_netmask = network['ipv6_netmask_txt']
-
-            bundle_data = template_data.replace('$int$', bundle)
-            bundle_data = bundle_data.replace('$VLANID$', vlanid)
-            bundle_data = bundle_data.replace('$IPV4-ADDR1$', ipvfour)
-            bundle_data = bundle_data.replace('$IPV4-MASK$', ipvfour_netmask)
-            bundle_data = bundle_data.replace('$vrf$', vrf)
-            bundle_data = bundle_data.replace('$NAME$', name)
-
-            configs[config_file] = configs[config_file] + bundle_data
-            # Need to figure out in which file to put the config in,
-            # it also has to be appended
-        for k, v in configs.iteritems():
+        for k, v in router_configs.iteritems():
             if k:
                 with open(settings.configs['routers'] + k, 'w+') as f:
                     f.write(v)
-        
-        def create_switches(self):
-            """ Create Switch configs
-
-            Generate switch configuration, vlanid port and row
-            """
-
-
 
 def main():
     """ Coreconfig """
@@ -232,7 +253,7 @@ def main():
                       settings.templates,
                       settings.configs)
     core.create_bundles()
-    core.create_routers()
+    core.create_config()
 
 if __name__ == "__main__":
     main()
